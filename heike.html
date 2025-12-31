@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOTE // SOLID_STATE</title>
+    <style>
+        /* =========================================
+           CORE THEME: SOLID TERMINAL
+           ========================================= */
+        :root {
+            --bg: #000000;
+            --blue: #5555FF;
+            --grey: #AAAAAA;
+            --white: #FFFFFF;
+            --silver: #E0E6ED;
+            
+            /* 强制等宽点阵字体，保证进度条对齐 */
+            --font: "Perfect DOS VGA 437", "Consolas", "Monaco", monospace;
+        }
+
+        * { box-sizing: border-box; cursor: text; user-select: none; }
+        
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: var(--bg); color: var(--grey);
+            font-family: var(--font); font-size: 14px;
+            overflow: hidden;
+        }
+
+        /* 1. CRT 扫描线 */
+        #crt {
+            position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 4px;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.8);
+        }
+
+        /* 2. HEADER */
+        #header {
+            position: fixed; top: 0; left: 0; width: 100%; height: 40px;
+            background: #000; z-index: 100;
+            display: flex; align-items: center; padding: 0 15px;
+            border-bottom: 2px solid #111;
+        }
+
+        /* 氤氲呼吸 Logo */
+        @keyframes mist {
+            0%, 100% { text-shadow: 0 0 5px rgba(224,230,237,0.3); opacity: 0.6; }
+            50% { text-shadow: 0 0 20px rgba(224,230,237,0.8); opacity: 1; }
+        }
+        .brand {
+            font-size: 18px; font-weight: 900; letter-spacing: 4px;
+            color: var(--silver); animation: mist 4s ease-in-out infinite;
+        }
+
+        /* 3. MEDIA LAYER (VIDEO BG) */
+        #media-layer {
+            position: fixed; inset: 0; z-index: 0;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0.25; pointer-events: none;
+        }
+        video {
+            width: 100%; height: 100%; object-fit: cover;
+            filter: grayscale(100%) contrast(1.4) brightness(0.6);
+        }
+
+        /* 4. TERMINAL (CONTENT) */
+        #terminal {
+            position: absolute; top: 40px; bottom: 0; left: 0; width: 100%;
+            padding: 20px; overflow-y: auto; z-index: 10;
+            display: flex; flex-direction: column;
+        }
+        #terminal::-webkit-scrollbar { width: 0; }
+
+        .line { 
+            margin-bottom: 4px; 
+            white-space: pre-wrap; /* 允许换行 */
+            line-height: 1.5;
+        }
+
+        /* --- 核心：波形条样式 --- */
+        .viz-container {
+            color: var(--white);
+            font-weight: bold;
+            margin-bottom: 15px; /* 与下文拉开距离 */
+            white-space: pre;   /* 强制不换行，保留空格宽度 */
+            font-family: var(--font);
+            text-shadow: 0 0 5px rgba(255,255,255,0.6);
+        }
+
+        /* COLORS */
+        .c-white { color: var(--white); }
+        .c-dim { color: #555; }
+        .c-blue { color: var(--blue); }
+        .c-ok { color: #55FF55; }
+        .c-err { color: #FF5555; }
+
+        /* INPUT AREA */
+        #input-line { display: flex; margin-top: 5px; opacity: 0; }
+        .prompt { color: var(--blue); margin-right: 10px; font-weight: bold; }
+        #cmd-input {
+            flex: 1; background: transparent; border: none; outline: none;
+            color: var(--white); font-family: var(--font); font-size: 14px;
+            caret-color: var(--white); text-transform: uppercase;
+        }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="crt"></div>
+
+<div id="header">
+    <div class="brand">NOTE</div>
+</div>
+
+<div id="media-layer">
+    <video id="vid-player" loop muted playsinline class="hidden"></video>
+</div>
+
+<div id="terminal">
+    <div id="output"></div>
+    <div id="input-line">
+        <span class="prompt">ADMIN@NOTE:~#</span>
+        <input type="text" id="cmd-input" spellcheck="false" autocomplete="off">
+    </div>
+</div>
+
+<input type="file" id="file-picker" class="hidden" multiple>
+
+<script>
+/**
+ * NOTE OS // SOLID STATE KERNEL
+ */
+
+const Sys = {
+    out: document.getElementById('output'),
+    inputDiv: document.getElementById('input-line'),
+    input: document.getElementById('cmd-input'),
+    video: document.getElementById('vid-player'),
+    
+    audioCtx: null,
+    analyser: null,
+    source: null,
+    
+    // 当前正在跳动的 DOM 引用
+    activeVizElement: null,
+
+    // --- 打印机效果 ---
+    print: async (text, style = '', delay = 10) => {
+        const div = document.createElement('div');
+        div.className = 'line ' + style;
+        Sys.out.appendChild(div);
+        
+        if (delay === 0) {
+            div.innerHTML = text;
+            Sys.scroll(); return;
+        }
+
+        let i = 0;
+        // 简单处理HTML标签不被拆分
+        while(i < text.length) {
+            const char = text[i];
+            div.innerHTML = text.slice(0, i+1);
+            Sys.scroll();
+            if (char !== ' ') await new Promise(r => setTimeout(r, Math.random() * delay));
+            i++;
+        }
+    },
+
+    scroll: () => {
+        document.getElementById('terminal').scrollTop = document.getElementById('terminal').scrollHeight;
+    },
+
+    // --- 启动 ---
+    boot: async () => {
+        const logs = [
+            { t: "NOTE KERNEL v4.0 // INITIALIZED", s: "c-white" },
+            { t: "MEMORY BLOCK 0x0000-0xFFFF ... OK", s: "c-dim" },
+            { t: "LOADING VIRTUAL FILE SYSTEM ... OK", s: "c-dim" },
+            { t: "SYSTEM ONLINE.", s: "c-ok" }
+        ];
+
+        await new Promise(r => setTimeout(r, 300));
+
+        for(let log of logs) {
+            await Sys.print(log.t, log.s, 5);
+            await new Promise(r => setTimeout(r, 50));
+        }
+        
+        Sys.inputDiv.style.opacity = 1;
+        Sys.input.focus();
+    },
+
+    // --- 文件处理 ---
+    handleFiles: (files) => {
+        if(!files.length) return;
+        const file = files[0];
+        const url = URL.createObjectURL(file);
+        
+        // 1. 打印文件名
+        Sys.print(`> READING: ${file.name}`, 'c-white', 5).then(() => {
+            
+            // 2. 判断类型
+            if(file.type.startsWith('audio')) {
+                Sys.video.classList.add('hidden');
+                
+                // 3. 立即创建波形条占位符 (紧跟文件名)
+                const viz = document.createElement('div');
+                viz.className = 'line viz-container';
+                // 初始状态：空条
+                viz.innerText = `[                                        ]`; 
+                Sys.out.appendChild(viz);
+                
+                // 4. 标记为活动
+                Sys.activeVizElement = viz; 
+                Sys.scroll();
+
+                // 5. 启动音频
+                Sys.initAudio(url);
+                
+                // 6. 额外提示 (可选)
+                // Sys.print("> AUDIO DECODED.", "c-ok");
+
+            } else if (file.type.startsWith('video')) {
+                Sys.video.src = url;
+                Sys.video.classList.remove('hidden');
+                Sys.video.play();
+                Sys.activeVizElement = null; // 停止音频动画
+                Sys.print("> VIDEO SIGNAL ESTABLISHED.", "c-ok");
+            } else {
+                Sys.print("> ERROR: UNKNOWN FORMAT.", "c-err");
+            }
+        });
+    },
+
+    // --- 音频初始化 ---
+    initAudio: (url) => {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if(!Sys.audioCtx) {
+            Sys.audioCtx = new AC();
+        }
+        // 强制唤醒 (修复 # 不出现的关键)
+        if (Sys.audioCtx.state === 'suspended') {
+            Sys.audioCtx.resume();
+        }
+
+        if(Sys.source) Sys.source.disconnect();
+
+        Sys.analyser = Sys.audioCtx.createAnalyser();
+        Sys.analyser.fftSize = 64; // 采样大小
+        Sys.analyser.smoothingTimeConstant = 0.8; // 平滑度
+
+        const audio = new Audio(url);
+        audio.crossOrigin = "anonymous";
+        Sys.source = Sys.audioCtx.createMediaElementSource(audio);
+        Sys.source.connect(Sys.analyser);
+        Sys.analyser.connect(Sys.audioCtx.destination);
+        
+        audio.play();
+        
+        // 开始渲染循环
+        Sys.renderLoop();
+    },
+
+    // --- 渲染循环 ---
+    renderLoop: () => {
+        if(!Sys.analyser || !Sys.activeVizElement) return;
+        
+        // 检查元素是否还在页面上
+        if(!document.body.contains(Sys.activeVizElement)) {
+            Sys.activeVizElement = null; return;
+        }
+
+        requestAnimationFrame(Sys.renderLoop);
+
+        const dataArray = new Uint8Array(Sys.analyser.frequencyBinCount);
+        Sys.analyser.getByteFrequencyData(dataArray);
+
+        // 计算音量 (RMS 近似值)
+        let sum = 0;
+        for(let i=0; i<dataArray.length; i++) sum += dataArray[i];
+        const average = sum / dataArray.length;
+
+        // 映射长度 (0 - 40格)
+        const maxLen = 40;
+        // 增加灵敏度 (* 1.5)，确保低音量也有显示
+        let fillLen = Math.floor((average / 255) * maxLen * 1.5);
+        if(fillLen > maxLen) fillLen = maxLen;
+        
+        // 如果有声音但计算为0，强制显示1格，避免看起来像死机
+        if(average > 0 && fillLen === 0) fillLen = 1;
+
+        // 构建字符串
+        const bar = "#".repeat(fillLen);
+        const empty = " ".repeat(maxLen - fillLen);
+
+        // 更新 DOM
+        Sys.activeVizElement.innerText = `[${bar}${empty}]`;
+    },
+
+    // --- 命令处理 ---
+    exec: (raw) => {
+        const cmd = raw.trim();
+        if(!cmd) return;
+        
+        const echo = document.createElement('div');
+        echo.className = 'line';
+        echo.innerHTML = `<span class="c-blue">USER@NOTE:~$</span> ${cmd}`;
+        Sys.out.appendChild(echo);
+        Sys.scroll();
+
+        const args = cmd.toLowerCase().split(' ');
+        
+        switch(args[0]) {
+            case 'load': document.getElementById('file-picker').click(); break;
+            case 'cls': 
+                Sys.out.innerHTML = ''; 
+                Sys.activeVizElement = null; // 清屏停止动画
+                break;
+            case 'time': Sys.print(`> SYSTEM TIME: ${new Date().toLocaleTimeString()}`, 'c-white', 0); break;
+            case 'reboot': location.reload(); break;
+            case 'help': Sys.print("COMMANDS: LOAD, CLS, TIME, REBOOT", 'c-dim', 0); break;
+            default: Sys.print(`> ERROR: INVALID INSTRUCTION`, 'c-err', 0);
+        }
+    }
+};
+
+// --- 事件监听 ---
+Sys.input.addEventListener('keydown', e => {
+    if(e.key === 'Enter') { Sys.exec(Sys.input.value); Sys.input.value = ''; }
+});
+
+document.addEventListener('click', () => {
+    // 自动聚焦输入框，除非选中文本
+    if(window.getSelection().toString() === "") Sys.input.focus();
+});
+
+document.getElementById('file-picker').addEventListener('change', e => Sys.handleFiles(e.target.files));
+
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); Sys.handleFiles(e.dataTransfer.files); });
+
+// 启动
+Sys.boot();
+
+</script>
+</body>
+</html>
